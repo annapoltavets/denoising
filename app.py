@@ -60,7 +60,7 @@ st.caption(
 # Colour palette  (name → BGR tuple for OpenCV)
 # ---------------------------------------------------------------------------
 
-COLORS: dict[str, tuple[int, int, int]] = {
+COLORS: dict[str, tuple[int, int, int]] = {  # values are BGR tuples (OpenCV convention)
     "Red":     (0,   0,   255),
     "Green":   (0,   255, 0),
     "Blue":    (255, 0,   0),
