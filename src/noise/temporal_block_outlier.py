@@ -265,20 +265,14 @@ class TemporalBlockOutlierNoise(Noise):
         if frame.ndim == 3:
             channels_out = []
             for c in range(frame.shape[2]):
-                buf_channel = np.stack(
+                # Build the per-channel temporal stack from the buffer.
+                # Buffer frames may be BGR or grayscale; extract channel c if
+                # BGR, otherwise use the single grayscale channel for all.
+                buf_c = np.stack(
                     [
-                        (
-                            cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
-                            if f.ndim == 3
-                            else f
-                        ).astype(np.float32)
+                        (f[:, :, c] if f.ndim == 3 else f).astype(np.float32)
                         for f in self._buffer
                     ],
-                    axis=0,
-                )  # (T, H, W) — we use per-channel later; grayscale proxy for now
-                # Use BGR channel from buffer
-                buf_c = np.stack(
-                    [f[:, :, c].astype(np.float32) for f in self._buffer],
                     axis=0,
                 )  # (T, H, W)
                 temporal_median = np.median(buf_c, axis=0)  # (H, W)
@@ -291,6 +285,8 @@ class TemporalBlockOutlierNoise(Noise):
                 channels_out.append(channel)
             result = np.stack(channels_out, axis=-1)
         else:
+            # Grayscale output: convert BGR buffer frames to grayscale for
+            # a consistent temporal median.
             buf_stack = np.stack(
                 [
                     (
