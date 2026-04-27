@@ -6,10 +6,9 @@ Run with:
 
 from __future__ import annotations
 
-import sys
 import os
+import sys
 import tempfile
-from typing import Optional
 
 import cv2
 import numpy as np
@@ -21,25 +20,25 @@ import streamlit as st
 sys.path.insert(0, os.path.dirname(__file__))
 
 from src.noise import (  # noqa: E402
-    WhiteGaussianNoise,
-    ShotNoise,
-    ScaledPoissonNoise,
-    PoissonGaussianNoise,
-    HeteroskedasticGaussianNoise,
-    MultiplicativeNoise,
-    ThermalNoise,
+    ClippingSaturationNoise,
+    ColoredCorrelatedNoise,
     CrossTalkNoise,
     FixedPatternNoise,
-    RowColumnStripingNoise,
-    QuantizationNoise,
-    ClippingSaturationNoise,
-    PRNUNoise,
-    GainNonuniformityNoise,
     FlickerNoise,
+    GainNonuniformityNoise,
+    HeteroskedasticGaussianNoise,
     LensFlareNoise,
-    ColoredCorrelatedNoise,
+    MultiplicativeNoise,
+    PoissonGaussianNoise,
+    PRNUNoise,
+    QuantizationNoise,
     RealCameraRawNoise,
+    RowColumnStripingNoise,
+    ScaledPoissonNoise,
+    ShotNoise,
     TemporalBlockOutlierNoise,
+    ThermalNoise,
+    WhiteGaussianNoise,
 )
 
 # ---------------------------------------------------------------------------
@@ -80,6 +79,146 @@ def read_video_frames(path: str) -> list[np.ndarray]:
     return frames
 
 
+def build_noises_from_config(cfg: dict) -> list:
+    """Reconstruct noise instances from a plain-dict configuration.
+
+    Using a plain dict (rather than serialising live objects) as the cache
+    key is safe and avoids any deserialization risks.
+    """
+    noises = []
+    p = cfg  # shorthand
+
+    if p["rcn_on"]:
+        noises.append(RowColumnStripingNoise(stripe_threshold=p["rcn_thresh"]))
+    if p["clip_on"]:
+        noises.append(
+            ClippingSaturationNoise(
+                clip_threshold=p["clip_thresh"], inpaint_radius=p["clip_radius"]
+            )
+        )
+    if p["quant_on"]:
+        noises.append(
+            QuantizationNoise(
+                effective_bits_threshold=p["quant_bits"],
+                gauss_sigma=p["quant_sigma"],
+            )
+        )
+    if p["wgn_on"]:
+        noises.append(
+            WhiteGaussianNoise(sigma_threshold=p["wgn_sigma"], h=p["wgn_h"])
+        )
+    if p["shot_on"]:
+        noises.append(
+            ShotNoise(
+                r2_threshold=p["shot_r2"],
+                block_size=p["shot_bs"],
+                gauss_sigma=p["shot_gsigma"],
+            )
+        )
+    if p["sp_on"]:
+        noises.append(
+            ScaledPoissonNoise(
+                r2_threshold=p["sp_r2"],
+                alpha_min=p["sp_amin"],
+                block_size=p["sp_bs"],
+                gauss_sigma=p["sp_gsigma"],
+            )
+        )
+    if p["pg_on"]:
+        noises.append(
+            PoissonGaussianNoise(
+                r2_threshold=p["pg_r2"],
+                block_size=p["pg_bs"],
+                gauss_sigma=p["pg_gsigma"],
+            )
+        )
+    if p["hg_on"]:
+        noises.append(
+            HeteroskedasticGaussianNoise(
+                slope_threshold=p["hg_slope"],
+                n_bins=p["hg_bins"],
+                block_size=p["hg_bs"],
+            )
+        )
+    if p["mul_on"]:
+        noises.append(
+            MultiplicativeNoise(
+                cv_ratio_threshold=p["mul_cv"], gauss_sigma=p["mul_gsigma"]
+            )
+        )
+    if p["thm_on"]:
+        noises.append(
+            ThermalNoise(
+                dark_threshold=p["thm_dark"],
+                sigma_threshold=p["thm_sigma"],
+                gauss_ksize=p["thm_ksize"],
+            )
+        )
+    if p["ct_on"]:
+        noises.append(CrossTalkNoise(corr_threshold=p["ct_corr"]))
+    if p["cc_on"]:
+        noises.append(ColoredCorrelatedNoise(flatness_threshold=p["cc_flat"]))
+    if p["gnu_on"]:
+        noises.append(
+            GainNonuniformityNoise(
+                grid_size=p["gnu_grid"], cv_threshold=p["gnu_cv"]
+            )
+        )
+    if p["lf_on"]:
+        noises.append(
+            LensFlareNoise(
+                bright_threshold=p["lf_bright"],
+                area_threshold=p["lf_area"],
+                dilate_ksize=p["lf_dilate"],
+                inpaint_radius=p["lf_inpaint"],
+            )
+        )
+    if p["fpn_on"]:
+        noises.append(
+            FixedPatternNoise(
+                warmup_frames=p["fpn_warmup"],
+                pattern_threshold=p["fpn_thresh"],
+                learning_rate=p["fpn_lr"],
+            )
+        )
+    if p["prnu_on"]:
+        noises.append(
+            PRNUNoise(
+                warmup_frames=p["prnu_warmup"],
+                cv_threshold=p["prnu_cv"],
+                learning_rate=p["prnu_lr"],
+            )
+        )
+    if p["flk_on"]:
+        noises.append(
+            FlickerNoise(
+                warmup_frames=p["flk_warmup"],
+                flicker_threshold=p["flk_thresh"],
+                learning_rate=p["flk_lr"],
+            )
+        )
+    if p["rcr_on"]:
+        noises.append(
+            RealCameraRawNoise(
+                noise_threshold=p["rcr_thresh"],
+                block_size=p["rcr_bs"],
+                h_luminance=p["rcr_hlum"],
+                h_color=p["rcr_hcol"],
+            )
+        )
+    if p["tbo_on"]:
+        noises.append(
+            TemporalBlockOutlierNoise(
+                block_size=p["tbo_bs"],
+                zscore_threshold=p["tbo_zt"],
+                min_outlier_fraction=p["tbo_frac"],
+                buffer_size=p["tbo_buf"],
+                warmup_frames=p["tbo_warmup"],
+            )
+        )
+    return noises
+
+
 # ---------------------------------------------------------------------------
 # Sidebar — noise type toggles and parameter controls
 # ---------------------------------------------------------------------------
@@ -91,329 +230,285 @@ show_mask = st.sidebar.toggle("🔴 Overlay noise mask", value=False)
 
 st.sidebar.divider()
 
-# Each entry: (label, enabled_default, constructor)
-# We collect user-configured noise instances into `active_noises`.
-active_noises: list = []
+# Collect all user-chosen values into a plain dict used as a cache key and to
+# reconstruct noise instances without any serialisation / deserialisation.
+cfg: dict = {}
 
 # ------ Row/Column Striping ------
 with st.sidebar.expander("Row / Column Striping", expanded=False):
-    rcn_on = st.checkbox("Enable", value=True, key="rcn_on")
-    rcn_thresh = st.slider(
+    cfg["rcn_on"] = st.checkbox("Enable", value=True, key="rcn_on")
+    cfg["rcn_thresh"] = st.slider(
         "Stripe threshold (σ of row/col means)",
         min_value=0.5, max_value=20.0, value=2.0, step=0.5, key="rcn_thresh",
     )
-if rcn_on:
-    active_noises.append(RowColumnStripingNoise(stripe_threshold=rcn_thresh))
 
 # ------ Clipping / Saturation ------
 with st.sidebar.expander("Clipping / Saturation", expanded=False):
-    clip_on = st.checkbox("Enable", value=True, key="clip_on")
-    clip_thresh = st.slider(
+    cfg["clip_on"] = st.checkbox("Enable", value=True, key="clip_on")
+    cfg["clip_thresh"] = st.slider(
         "Clipped pixel fraction threshold",
         min_value=0.001, max_value=0.2, value=0.01, step=0.001,
         format="%.3f", key="clip_thresh",
     )
-    clip_radius = st.slider(
+    cfg["clip_radius"] = st.slider(
         "Inpaint radius (px)", min_value=1, max_value=10, value=3, key="clip_radius",
-    )
-if clip_on:
-    active_noises.append(
-        ClippingSaturationNoise(clip_threshold=clip_thresh, inpaint_radius=clip_radius)
     )
 
 # ------ Quantization ------
 with st.sidebar.expander("Quantization", expanded=False):
-    quant_on = st.checkbox("Enable", value=True, key="quant_on")
-    quant_bits = st.slider(
+    cfg["quant_on"] = st.checkbox("Enable", value=True, key="quant_on")
+    cfg["quant_bits"] = st.slider(
         "Effective-bits threshold (< → noisy)",
         min_value=1, max_value=8, value=5, key="quant_bits",
     )
-    quant_sigma = st.slider(
+    cfg["quant_sigma"] = st.slider(
         "Smoothing σ", min_value=0.1, max_value=3.0, value=0.8, step=0.1,
         key="quant_sigma",
-    )
-if quant_on:
-    active_noises.append(
-        QuantizationNoise(
-            effective_bits_threshold=quant_bits, gauss_sigma=quant_sigma
-        )
     )
 
 # ------ White Gaussian ------
 with st.sidebar.expander("White Gaussian (AWGN)", expanded=False):
-    wgn_on = st.checkbox("Enable", value=True, key="wgn_on")
-    wgn_sigma = st.slider(
+    cfg["wgn_on"] = st.checkbox("Enable", value=True, key="wgn_on")
+    cfg["wgn_sigma"] = st.slider(
         "σ threshold (DN)", min_value=1.0, max_value=30.0, value=5.0, step=0.5,
         key="wgn_sigma",
     )
-    wgn_h = st.slider(
+    cfg["wgn_h"] = st.slider(
         "NLM filter strength h", min_value=1, max_value=30, value=10, key="wgn_h",
     )
-if wgn_on:
-    active_noises.append(WhiteGaussianNoise(sigma_threshold=wgn_sigma, h=wgn_h))
 
 # ------ Shot Noise ------
 with st.sidebar.expander("Shot / Photon Noise", expanded=False):
-    shot_on = st.checkbox("Enable", value=True, key="shot_on")
-    shot_r2 = st.slider(
+    cfg["shot_on"] = st.checkbox("Enable", value=True, key="shot_on")
+    cfg["shot_r2"] = st.slider(
         "R² threshold", min_value=0.1, max_value=1.0, value=0.7, step=0.05,
         key="shot_r2",
     )
-    shot_bs = st.slider(
+    cfg["shot_bs"] = st.slider(
         "Block size (px)", min_value=8, max_value=64, value=16, step=8,
         key="shot_bs",
     )
-    shot_gsigma = st.slider(
+    cfg["shot_gsigma"] = st.slider(
         "Gaussian σ (removal)", min_value=0.1, max_value=5.0, value=1.0, step=0.1,
         key="shot_gsigma",
-    )
-if shot_on:
-    active_noises.append(
-        ShotNoise(r2_threshold=shot_r2, block_size=shot_bs, gauss_sigma=shot_gsigma)
     )
 
 # ------ Scaled Poisson ------
 with st.sidebar.expander("Scaled Poisson Noise", expanded=False):
-    sp_on = st.checkbox("Enable", value=True, key="sp_on")
-    sp_r2 = st.slider(
+    cfg["sp_on"] = st.checkbox("Enable", value=True, key="sp_on")
+    cfg["sp_r2"] = st.slider(
         "R² threshold", min_value=0.1, max_value=1.0, value=0.7, step=0.05,
         key="sp_r2",
     )
-    sp_amin = st.slider(
+    cfg["sp_amin"] = st.slider(
         "Min gain α", min_value=0.01, max_value=5.0, value=0.1, step=0.01,
         key="sp_amin",
     )
-    sp_bs = st.slider(
+    cfg["sp_bs"] = st.slider(
         "Block size (px)", min_value=8, max_value=64, value=16, step=8,
         key="sp_bs",
     )
-    sp_gsigma = st.slider(
+    cfg["sp_gsigma"] = st.slider(
         "Gaussian σ (removal)", min_value=0.1, max_value=5.0, value=1.0, step=0.1,
         key="sp_gsigma",
-    )
-if sp_on:
-    active_noises.append(
-        ScaledPoissonNoise(
-            r2_threshold=sp_r2,
-            alpha_min=sp_amin,
-            block_size=sp_bs,
-            gauss_sigma=sp_gsigma,
-        )
     )
 
 # ------ Poisson-Gaussian ------
 with st.sidebar.expander("Poisson–Gaussian Mixed Noise", expanded=False):
-    pg_on = st.checkbox("Enable", value=True, key="pg_on")
-    pg_r2 = st.slider(
+    cfg["pg_on"] = st.checkbox("Enable", value=True, key="pg_on")
+    cfg["pg_r2"] = st.slider(
         "R² threshold", min_value=0.1, max_value=1.0, value=0.6, step=0.05,
         key="pg_r2",
     )
-    pg_bs = st.slider(
+    cfg["pg_bs"] = st.slider(
         "Block size (px)", min_value=8, max_value=64, value=16, step=8,
         key="pg_bs",
     )
-    pg_gsigma = st.slider(
+    cfg["pg_gsigma"] = st.slider(
         "Gaussian σ (removal)", min_value=0.1, max_value=5.0, value=1.0, step=0.1,
         key="pg_gsigma",
-    )
-if pg_on:
-    active_noises.append(
-        PoissonGaussianNoise(
-            r2_threshold=pg_r2, block_size=pg_bs, gauss_sigma=pg_gsigma
-        )
     )
 
 # ------ Heteroskedastic Gaussian ------
 with st.sidebar.expander("Heteroskedastic Gaussian Noise", expanded=False):
-    hg_on = st.checkbox("Enable", value=True, key="hg_on")
-    hg_slope = st.slider(
+    cfg["hg_on"] = st.checkbox("Enable", value=True, key="hg_on")
+    cfg["hg_slope"] = st.slider(
         "Slope threshold", min_value=0.001, max_value=1.0, value=0.05, step=0.005,
         format="%.3f", key="hg_slope",
     )
-    hg_bins = st.slider(
+    cfg["hg_bins"] = st.slider(
         "Intensity bins", min_value=2, max_value=32, value=8, key="hg_bins",
     )
-    hg_bs = st.slider(
+    cfg["hg_bs"] = st.slider(
         "Block size (px)", min_value=8, max_value=64, value=16, step=8,
         key="hg_bs",
-    )
-if hg_on:
-    active_noises.append(
-        HeteroskedasticGaussianNoise(
-            slope_threshold=hg_slope, n_bins=hg_bins, block_size=hg_bs
-        )
     )
 
 # ------ Multiplicative ------
 with st.sidebar.expander("Multiplicative Noise", expanded=False):
-    mul_on = st.checkbox("Enable", value=True, key="mul_on")
-    mul_cv = st.slider(
+    cfg["mul_on"] = st.checkbox("Enable", value=True, key="mul_on")
+    cfg["mul_cv"] = st.slider(
         "CV ratio threshold", min_value=0.1, max_value=1.0, value=0.6, step=0.05,
         key="mul_cv",
     )
-    mul_gsigma = st.slider(
+    cfg["mul_gsigma"] = st.slider(
         "Gaussian σ (removal)", min_value=0.1, max_value=5.0, value=1.5, step=0.1,
         key="mul_gsigma",
-    )
-if mul_on:
-    active_noises.append(
-        MultiplicativeNoise(
-            cv_ratio_threshold=mul_cv, gauss_sigma=mul_gsigma
-        )
     )
 
 # ------ Thermal ------
 with st.sidebar.expander("Thermal Noise (Dark Current)", expanded=False):
-    thm_on = st.checkbox("Enable", value=True, key="thm_on")
-
-if thm_on:
-    active_noises.append(ThermalNoise())
+    cfg["thm_on"] = st.checkbox("Enable", value=True, key="thm_on")
+    cfg["thm_dark"] = st.slider(
+        "Dark pixel threshold (DN)", min_value=10, max_value=100, value=50,
+        key="thm_dark",
+    )
+    cfg["thm_sigma"] = st.slider(
+        "Noise σ threshold (DN)", min_value=0.5, max_value=20.0, value=4.0, step=0.5,
+        key="thm_sigma",
+    )
+    cfg["thm_ksize"] = st.slider(
+        "Gaussian kernel size (odd px)", min_value=3, max_value=15, value=5, step=2,
+        key="thm_ksize",
+    )
 
 # ------ Cross-Talk ------
 with st.sidebar.expander("Cross-Talk Noise", expanded=False):
-    ct_on = st.checkbox("Enable", value=True, key="ct_on")
-
-if ct_on:
-    active_noises.append(CrossTalkNoise())
+    cfg["ct_on"] = st.checkbox("Enable", value=True, key="ct_on")
+    cfg["ct_corr"] = st.slider(
+        "Lag-1 correlation threshold", min_value=0.01, max_value=0.9, value=0.15,
+        step=0.01, key="ct_corr",
+    )
 
 # ------ Colored / Correlated ------
 with st.sidebar.expander("Colored / Correlated Noise", expanded=False):
-    cc_on = st.checkbox("Enable", value=True, key="cc_on")
-
-if cc_on:
-    active_noises.append(ColoredCorrelatedNoise())
+    cfg["cc_on"] = st.checkbox("Enable", value=True, key="cc_on")
+    cfg["cc_flat"] = st.slider(
+        "Spectral flatness threshold (< → noisy)",
+        min_value=0.05, max_value=0.95, value=0.3, step=0.05, key="cc_flat",
+    )
 
 # ------ Gain Nonuniformity ------
 with st.sidebar.expander("Gain Nonuniformity", expanded=False):
-    gnu_on = st.checkbox("Enable", value=True, key="gnu_on")
-    gnu_grid = st.slider(
+    cfg["gnu_on"] = st.checkbox("Enable", value=True, key="gnu_on")
+    cfg["gnu_grid"] = st.slider(
         "Grid size (tiles per side)", min_value=2, max_value=16, value=4,
         key="gnu_grid",
     )
-    gnu_cv = st.slider(
+    cfg["gnu_cv"] = st.slider(
         "CV threshold", min_value=0.01, max_value=0.3, value=0.05, step=0.01,
         key="gnu_cv",
-    )
-if gnu_on:
-    active_noises.append(
-        GainNonuniformityNoise(grid_size=gnu_grid, cv_threshold=gnu_cv)
     )
 
 # ------ Lens Flare ------
 with st.sidebar.expander("Lens Flare Noise", expanded=False):
-    lf_on = st.checkbox("Enable", value=True, key="lf_on")
-
-if lf_on:
-    active_noises.append(LensFlareNoise())
+    cfg["lf_on"] = st.checkbox("Enable", value=True, key="lf_on")
+    cfg["lf_bright"] = st.slider(
+        "Bright pixel threshold (DN)", min_value=150, max_value=255, value=240,
+        key="lf_bright",
+    )
+    cfg["lf_area"] = st.slider(
+        "Min flare area (px²)", min_value=10, max_value=2000, value=200,
+        key="lf_area",
+    )
+    cfg["lf_dilate"] = st.slider(
+        "Dilation kernel size (px)", min_value=1, max_value=15, value=5, step=2,
+        key="lf_dilate",
+    )
+    cfg["lf_inpaint"] = st.slider(
+        "Inpaint radius (px)", min_value=1, max_value=20, value=5, key="lf_inpaint",
+    )
 
 # ------ Fixed Pattern ------
 with st.sidebar.expander("Fixed-Pattern Noise (temporal)", expanded=False):
-    fpn_on = st.checkbox("Enable", value=True, key="fpn_on")
-    fpn_warmup = st.slider(
+    cfg["fpn_on"] = st.checkbox("Enable", value=True, key="fpn_on")
+    cfg["fpn_warmup"] = st.slider(
         "Warmup frames", min_value=2, max_value=30, value=10, key="fpn_warmup",
     )
-    fpn_thresh = st.slider(
+    cfg["fpn_thresh"] = st.slider(
         "Pattern std threshold", min_value=0.1, max_value=20.0, value=3.0, step=0.1,
         key="fpn_thresh",
     )
-    fpn_lr = st.slider(
+    cfg["fpn_lr"] = st.slider(
         "Learning rate", min_value=0.01, max_value=0.5, value=0.05, step=0.01,
         key="fpn_lr",
-    )
-if fpn_on:
-    active_noises.append(
-        FixedPatternNoise(
-            warmup_frames=fpn_warmup,
-            pattern_threshold=fpn_thresh,
-            learning_rate=fpn_lr,
-        )
     )
 
 # ------ PRNU ------
 with st.sidebar.expander("PRNU (temporal)", expanded=False):
-    prnu_on = st.checkbox("Enable", value=True, key="prnu_on")
-    prnu_warmup = st.slider(
+    cfg["prnu_on"] = st.checkbox("Enable", value=True, key="prnu_on")
+    cfg["prnu_warmup"] = st.slider(
         "Warmup frames", min_value=2, max_value=30, value=15, key="prnu_warmup",
     )
-    prnu_cv = st.slider(
+    cfg["prnu_cv"] = st.slider(
         "CV threshold", min_value=0.001, max_value=0.2, value=0.02, step=0.001,
         format="%.3f", key="prnu_cv",
     )
-    prnu_lr = st.slider(
+    cfg["prnu_lr"] = st.slider(
         "Learning rate", min_value=0.01, max_value=0.5, value=0.05, step=0.01,
         key="prnu_lr",
-    )
-if prnu_on:
-    active_noises.append(
-        PRNUNoise(
-            warmup_frames=prnu_warmup,
-            cv_threshold=prnu_cv,
-            learning_rate=prnu_lr,
-        )
     )
 
 # ------ Flicker ------
 with st.sidebar.expander("Flicker / Pink Noise (temporal)", expanded=False):
-    flk_on = st.checkbox("Enable", value=True, key="flk_on")
-    flk_warmup = st.slider(
+    cfg["flk_on"] = st.checkbox("Enable", value=True, key="flk_on")
+    cfg["flk_warmup"] = st.slider(
         "Warmup frames", min_value=2, max_value=20, value=5, key="flk_warmup",
     )
-    flk_thresh = st.slider(
+    cfg["flk_thresh"] = st.slider(
         "Brightness deviation threshold (DN)",
         min_value=0.5, max_value=30.0, value=5.0, step=0.5, key="flk_thresh",
     )
-    flk_lr = st.slider(
+    cfg["flk_lr"] = st.slider(
         "Learning rate", min_value=0.01, max_value=0.5, value=0.1, step=0.01,
         key="flk_lr",
-    )
-if flk_on:
-    active_noises.append(
-        FlickerNoise(
-            warmup_frames=flk_warmup,
-            flicker_threshold=flk_thresh,
-            learning_rate=flk_lr,
-        )
     )
 
 # ------ Real Camera Raw ------
 with st.sidebar.expander("Real Camera Raw (catch-all)", expanded=False):
-    rcr_on = st.checkbox("Enable", value=True, key="rcr_on")
-
-if rcr_on:
-    active_noises.append(RealCameraRawNoise())
+    cfg["rcr_on"] = st.checkbox("Enable", value=True, key="rcr_on")
+    cfg["rcr_thresh"] = st.slider(
+        "Noise σ threshold (DN)", min_value=1.0, max_value=30.0, value=5.0, step=0.5,
+        key="rcr_thresh",
+    )
+    cfg["rcr_bs"] = st.slider(
+        "Block size (px)", min_value=8, max_value=64, value=16, step=8,
+        key="rcr_bs",
+    )
+    cfg["rcr_hlum"] = st.slider(
+        "NLM luminance filter strength h", min_value=1, max_value=30, value=10,
+        key="rcr_hlum",
+    )
+    cfg["rcr_hcol"] = st.slider(
+        "NLM colour filter strength h", min_value=1, max_value=30, value=10,
+        key="rcr_hcol",
+    )
 
 # ------ Temporal Block Outlier ------
 with st.sidebar.expander("Temporal Block-Outlier Noise", expanded=False):
-    tbo_on = st.checkbox("Enable", value=True, key="tbo_on")
-    tbo_bs = st.slider(
+    cfg["tbo_on"] = st.checkbox("Enable", value=True, key="tbo_on")
+    cfg["tbo_bs"] = st.slider(
         "Block size (px)", min_value=4, max_value=64, value=8, step=4,
         key="tbo_bs",
     )
-    tbo_zt = st.slider(
+    cfg["tbo_zt"] = st.slider(
         "Z-score threshold", min_value=1.0, max_value=10.0, value=3.0, step=0.5,
         key="tbo_zt",
     )
-    tbo_frac = st.slider(
+    cfg["tbo_frac"] = st.slider(
         "Min outlier block fraction",
         min_value=0.001, max_value=0.5, value=0.01, step=0.001,
         format="%.3f", key="tbo_frac",
     )
-    tbo_buf = st.slider(
+    cfg["tbo_buf"] = st.slider(
         "Frame buffer size", min_value=3, max_value=60, value=20, key="tbo_buf",
     )
-    tbo_warmup = st.slider(
+    cfg["tbo_warmup"] = st.slider(
         "Warmup frames", min_value=2, max_value=20, value=5, key="tbo_warmup",
     )
-if tbo_on:
-    active_noises.append(
-        TemporalBlockOutlierNoise(
-            block_size=tbo_bs,
-            zscore_threshold=tbo_zt,
-            min_outlier_fraction=tbo_frac,
-            buffer_size=tbo_buf,
-            warmup_frames=tbo_warmup,
-        )
-    )
+
+# Build the active noise list from the collected configuration
+active_noises = build_noises_from_config(cfg)
 
 # ---------------------------------------------------------------------------
 # File upload
@@ -528,31 +623,7 @@ else:
         "Frame index", min_value=0, max_value=total - 1, value=0, step=1,
     )
 
-    # Feed all frames up to (and including) the selected one through the
-    # pipeline so that temporal detectors accumulate history correctly.
-    # We cache this to avoid re-processing on every slider interaction.
-    @st.cache_data(show_spinner="Processing frames…")
-    def process_up_to(
-        frame_bytes_list: list[bytes],
-        noise_key: str,  # used as cache key; changes when params change
-        target_idx: int,
-    ) -> tuple[list[bytes], list[list[str]]]:
-        """Process frames 0..target_idx and return encoded results."""
-        import pickle  # noqa: PLC0415
-
-        noises = pickle.loads(noise_key)  # noqa: S301
-        results: list[bytes] = []
-        det_lists: list[list[str]] = []
-        for raw in frame_bytes_list[: target_idx + 1]:
-            arr = np.frombuffer(raw, dtype=np.uint8)
-            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            denoised, dets = process_frame(frame, noises)
-            _, enc = cv2.imencode(".png", denoised)
-            results.append(enc.tobytes())
-            det_lists.append(dets)
-        return results, det_lists
-
-    # Encode frames as PNG bytes for caching
+    # Encode frames as PNG bytes for caching (avoids storing large numpy arrays)
     @st.cache_data(show_spinner="Encoding frames…")
     def encode_frames(path: str) -> list[bytes]:
         caps = read_video_frames(path)
@@ -562,14 +633,30 @@ else:
             out.append(enc.tobytes())
         return out
 
-    import pickle  # noqa: PLC0415
+    # Process frames 0..target_idx and return encoded denoised results.
+    # The noise configuration is passed as a plain hashable dict so that
+    # Streamlit can safely cache and invalidate results when params change.
+    @st.cache_data(show_spinner="Processing frames…")
+    def process_up_to(
+        frame_bytes_list: list[bytes],
+        noise_cfg: dict,
+        target_idx: int,
+    ) -> tuple[list[bytes], list[list[str]]]:
+        """Process frames 0..target_idx; return encoded denoised frames + detection lists."""
+        noises = build_noises_from_config(noise_cfg)
+        results: list[bytes] = []
+        det_lists: list[list[str]] = []
+        for raw in frame_bytes_list[: target_idx + 1]:
+            arr = np.frombuffer(raw, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            denoised_f, dets = process_frame(frame, noises)
+            _, enc = cv2.imencode(".png", denoised_f)
+            results.append(enc.tobytes())
+            det_lists.append(dets)
+        return results, det_lists
 
     encoded_frames = encode_frames(tmp_path)
-    noise_key = pickle.dumps(active_noises)
-
-    processed_encoded, det_lists = process_up_to(
-        encoded_frames, noise_key, frame_idx
-    )
+    processed_encoded, det_lists = process_up_to(encoded_frames, cfg, frame_idx)
 
     # Decode original and denoised for the selected frame
     orig_arr = np.frombuffer(encoded_frames[frame_idx], dtype=np.uint8)
@@ -602,9 +689,6 @@ else:
 
 with st.expander("📊 Active detectors", expanded=False):
     if active_noises:
-        rows = []
-        for n in active_noises:
-            rows.append({"Noise type": n.name})
-        st.table(rows)
+        st.table([{"Noise type": n.name} for n in active_noises])
     else:
         st.write("No detectors enabled.")
