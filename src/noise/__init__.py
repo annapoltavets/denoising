@@ -26,6 +26,7 @@ from .flicker import FlickerNoise
 from .lens_flare import LensFlareNoise
 from .colored_correlated import ColoredCorrelatedNoise
 from .real_camera_raw import RealCameraRawNoise
+from .temporal_block_outlier import TemporalBlockOutlierNoise
 
 __all__ = [
     "Noise",
@@ -47,6 +48,7 @@ __all__ = [
     "LensFlareNoise",
     "ColoredCorrelatedNoise",
     "RealCameraRawNoise",
+    "TemporalBlockOutlierNoise",
     "all_noises",
 ]
 
@@ -80,4 +82,6 @@ def all_noises() -> list["Noise"]:
         FlickerNoise(),
         # Catch-all for mixed real-camera noise (most expensive; runs last)
         RealCameraRawNoise(),
+        # Temporal block-outlier detector (multi-frame; maintains frame buffer)
+        TemporalBlockOutlierNoise(),
     ]
