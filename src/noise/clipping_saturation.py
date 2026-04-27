@@ -44,6 +44,12 @@ class ClippingSaturationNoise(Noise):
         mask = self._clip_mask(gray)
         return float(mask.sum()) / max(gray.size, 1)
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        return self._clip_mask(gray) * 255
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

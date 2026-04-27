@@ -38,6 +38,24 @@ class RowColumnStripingNoise(Noise):
         col_score = float(np.std(col_means))
         return row_score, col_score
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        f = gray.astype(np.float32)
+        global_mean = f.mean()
+        row_means = f.mean(axis=1, keepdims=True)
+        col_means = f.mean(axis=0, keepdims=True)
+        # Deviation map: combine row and column bias
+        row_dev = np.abs(row_means - global_mean)
+        col_dev = np.abs(col_means - global_mean)
+        dev_map = (
+            np.broadcast_to(row_dev, f.shape) + np.broadcast_to(col_dev, f.shape)
+        )
+        threshold = float(np.std(f)) * 0.5
+        mask = (dev_map > threshold).astype(np.uint8) * 255
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

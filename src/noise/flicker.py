@@ -55,6 +55,11 @@ class FlickerNoise(Noise):
             )
         self._frame_count += 1
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        # Flicker is a whole-frame brightness shift — all pixels are affected
+        h, w = frame.shape[:2] if frame.ndim == 3 else frame.shape
+        return np.full((h, w), 255, dtype=np.uint8)
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

@@ -49,6 +49,9 @@ class LensFlareNoise(Noise):
         dilated = cv2.dilate(binary, kernel, iterations=2)
         return dilated.astype(np.uint8)
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        return self._flare_mask(frame)
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

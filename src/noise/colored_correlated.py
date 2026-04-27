@@ -53,6 +53,15 @@ class ColoredCorrelatedNoise(Noise):
         restored = np.fft.ifft2(F * wiener_gain).real
         return np.clip(restored, 0, 255).astype(np.float32)
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        residual = np.abs(self._high_freq_residual(gray))
+        threshold = float(np.std(residual)) * 2.0
+        mask = (residual > threshold).astype(np.uint8) * 255
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

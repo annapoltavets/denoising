@@ -51,6 +51,26 @@ class PoissonGaussianNoise(Noise):
                 variances.append(block.var())
         return np.array(means), np.array(variances)
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        bs = self._block_size
+        h, w = gray.shape
+        means, variances = self._block_stats(gray)
+        mask = np.zeros((h, w), dtype=np.uint8)
+        if len(means) < 4:
+            return mask
+        alpha, sigma2 = self._alpha, self._sigma2
+        idx = 0
+        for i in range(0, h - bs, bs):
+            for j in range(0, w - bs, bs):
+                expected = alpha * means[idx] + sigma2
+                if variances[idx] > expected * 1.5 + 1.0:
+                    mask[i : i + bs, j : j + bs] = 255
+                idx += 1
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

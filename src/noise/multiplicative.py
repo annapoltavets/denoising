@@ -44,6 +44,17 @@ class MultiplicativeNoise(Noise):
         std = np.std(arr)
         return float(std / mean)
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        linear = gray.astype(np.float32) + 1.0
+        log_domain = np.log(linear)
+        residual = np.abs(self._high_freq_residual(log_domain))
+        threshold = float(np.std(residual)) * 2.0
+        mask = (residual > threshold).astype(np.uint8) * 255
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

@@ -45,6 +45,16 @@ class CrossTalkNoise(Noise):
         corr_v = float(np.mean(arr[:-1, :] * arr[1:, :]) / var)
         return max(abs(corr_h), abs(corr_v))
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        residual = np.abs(self._noise_residual(gray))
+        # Use 2-sigma threshold on the lag-1 correlated residual
+        threshold = float(np.std(residual)) * 2.0
+        mask = (residual > threshold).astype(np.uint8) * 255
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

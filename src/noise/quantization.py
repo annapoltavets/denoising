@@ -41,6 +41,13 @@ class QuantizationNoise(Noise):
         occupied = int(np.count_nonzero(hist))
         return float(np.log2(max(occupied, 1)))
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        # All pixels are affected by quantization error
+        return np.full(gray.shape, 255, dtype=np.uint8)
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

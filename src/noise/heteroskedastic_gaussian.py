@@ -56,6 +56,22 @@ class HeteroskedasticGaussianNoise(Noise):
             bin_vars.append(float(np.var(residual[mask])))
         return np.array(bin_means), np.array(bin_vars)
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        residual = np.abs(self._noise_residual(gray))
+        # Pixels whose residual exceeds 2× the estimated per-bin noise floor
+        bin_means, bin_vars = self._estimate_variance_curve(gray)
+        if len(bin_means) == 0:
+            return np.zeros(gray.shape, dtype=np.uint8)
+        # Map each pixel's intensity to its expected noise std
+        noise_floor = np.interp(
+            gray.astype(np.float32), bin_means, np.sqrt(np.maximum(bin_vars, 0))
+        )
+        mask = (residual > 2.0 * noise_floor + 1e-3).astype(np.uint8) * 255
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

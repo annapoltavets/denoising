@@ -53,6 +53,19 @@ class PRNUNoise(Noise):
             self._gain_map = (1.0 - self._lr) * self._gain_map + self._lr * gray_f
         self._frame_count += 1
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        if self._gain_map is None:
+            h, w = (
+                frame.shape[:2] if frame.ndim == 3 else frame.shape
+            )
+            return np.zeros((h, w), dtype=np.uint8)
+        gm = self._gain_map  # (H, W)
+        normalised_gain = gm / (gm.mean() + 1e-10)
+        # Pixels where per-pixel gain deviates more than 2× std from 1
+        gain_std = float(np.std(normalised_gain))
+        mask = (np.abs(normalised_gain - 1.0) > 2.0 * gain_std).astype(np.uint8) * 255
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

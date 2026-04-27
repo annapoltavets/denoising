@@ -55,6 +55,16 @@ class FixedPatternNoise(Noise):
             )
         self._frame_count += 1
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray_f = self._to_float_gray(frame)
+        if self._mean_frame is None:
+            return np.zeros(gray_f.shape, dtype=np.uint8)
+        pattern = self._mean_frame - self._mean_frame.mean()
+        # Pixels where the pattern deviation exceeds half the pattern std
+        threshold = max(float(np.std(pattern)) * 0.5, 1.0)
+        mask = (np.abs(pattern) > threshold).astype(np.uint8) * 255
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

@@ -44,6 +44,12 @@ class ThermalNoise(Noise):
             return 0.0
         return float(np.std(dark_pixels))
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        return (gray < self._dark_threshold).astype(np.uint8) * 255
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

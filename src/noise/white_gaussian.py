@@ -37,6 +37,20 @@ class WhiteGaussianNoise(Noise):
         sigma = np.sqrt(np.pi / 2.0) * np.mean(np.abs(filtered)) / 6.0
         return float(sigma)
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        kernel = np.array(
+            [[1, -2, 1], [-2, 4, -2], [1, -2, 1]], dtype=np.float32
+        )
+        residual = np.abs(
+            cv2.filter2D(gray.astype(np.float32), -1, kernel)
+        )
+        threshold = self._sigma_threshold * 6.0 / np.sqrt(np.pi / 2.0)
+        mask = (residual > threshold).astype(np.uint8) * 255
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------

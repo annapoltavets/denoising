@@ -46,6 +46,28 @@ class GainNonuniformityNoise(Noise):
                 means.append(float(tile.mean()))
         return np.array(means)
 
+    def _noise_mask(self, frame: np.ndarray) -> np.ndarray:
+        gray = (
+            cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+        )
+        f = gray.astype(np.float32)
+        h, w = f.shape
+        th, tw = h // self._grid, w // self._grid
+        global_mean = f.mean() + 1e-10
+        mask = np.zeros((h, w), dtype=np.uint8)
+        tile_means = self._tile_means(gray)
+        tile_std = float(np.std(tile_means))
+        threshold = tile_std * 1.0
+        idx = 0
+        for i in range(self._grid):
+            for j in range(self._grid):
+                r0, r1 = i * th, (i + 1) * th
+                c0, c1 = j * tw, (j + 1) * tw
+                if abs(tile_means[idx] - global_mean) > threshold:
+                    mask[r0:r1, c0:c1] = 255
+                idx += 1
+        return mask
+
     # ------------------------------------------------------------------
     # Interface
     # ------------------------------------------------------------------
