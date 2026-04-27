@@ -83,6 +83,9 @@ for _key, _default in [
     ("upload_name",    None),   # str — tracks which file is currently loaded
     ("status_msg",     ""),     # str — feedback for the last action
     ("status_ok",      True),   # bool — True → success, False → info
+    ("video_frames",   None),   # list[np.ndarray] | None — all video frames (BGR)
+    ("frame_idx",      0),      # int — index of the currently displayed frame
+    ("video_fps",      30.0),   # float — frames per second of the loaded video
 ]:
     if _key not in st.session_state:
         st.session_state[_key] = _default
@@ -129,6 +132,28 @@ def read_video_frames(path: str) -> list[np.ndarray]:
     return frames
 
 
+def read_video(path: str) -> tuple[list[np.ndarray], float]:
+    """Read all frames and FPS from a video file."""
+    cap = cv2.VideoCapture(path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frames: list[np.ndarray] = []
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+    cap.release()
+    return frames, fps
+
+
+def frame_timestamp(idx: int, fps: float) -> str:
+    """Return a human-readable timestamp string (MM:SS.f) for a frame index."""
+    total_secs = idx / max(fps, 1e-6)
+    minutes = int(total_secs // 60)
+    seconds = total_secs % 60
+    return f"{minutes:02d}:{seconds:05.2f}"
+
+
 def set_status(msg: str, ok: bool = True) -> None:
     """Update the status message in session state."""
     st.session_state.status_msg = msg
@@ -153,6 +178,8 @@ if uploaded is not None:
     # Reinitialise only when a different file is uploaded
     if uploaded.name != st.session_state.upload_name:
         st.session_state.upload_name = uploaded.name
+        st.session_state.video_frames = None
+        st.session_state.frame_idx    = 0
         if not _is_video:
             _raw = np.frombuffer(uploaded.read(), dtype=np.uint8)
             _img = cv2.imdecode(_raw, cv2.IMREAD_COLOR)
@@ -161,12 +188,15 @@ if uploaded is not None:
             with tempfile.NamedTemporaryFile(delete=False, suffix=_suffix) as _tmp:
                 _tmp.write(uploaded.read())
                 _tmp_path = _tmp.name
-            _all_frames = read_video_frames(_tmp_path)
+            _all_frames, _fps = read_video(_tmp_path)
+            if _all_frames:
+                st.session_state.video_frames = _all_frames
+                st.session_state.video_fps    = _fps
             _img = _all_frames[0] if _all_frames else None
 
         if _img is not None:
-            st.session_state.original      = _img
-            st.session_state.noise_frame   = _img.copy()
+            st.session_state.original       = _img
+            st.session_state.noise_frame    = _img.copy()
             st.session_state.denoised_frame = _img.copy()
             set_status("")
 
@@ -361,6 +391,90 @@ with st.sidebar.expander("Temporal Block-Outlier Noise", expanded=False):
     _pending.append((_det, _den, TemporalBlockOutlierNoise(block_size=_tbo_bs, zscore_threshold=_tbo_zt, min_outlier_fraction=_tbo_frac, buffer_size=_tbo_buf, warmup_frames=_tbo_warmup), _col))
 
 # ---------------------------------------------------------------------------
+# Main area — guard
+# ---------------------------------------------------------------------------
+
+if st.session_state.original is None:
+    st.info("👈 Upload an image using the sidebar to get started.")
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# Frame timeline — visible only when a video is loaded
+# ---------------------------------------------------------------------------
+
+_vf = st.session_state.video_frames
+if _vf is not None and len(_vf) > 1:
+    _total   = len(_vf)
+    _fps     = st.session_state.video_fps
+    _cur_idx = st.session_state.frame_idx
+
+    st.markdown("### 🎞️ Frame timeline")
+
+    # Navigation row: buttons + slider on one line
+    _nav_prev, _nav_slider, _nav_next = st.columns([1, 12, 1])
+    with _nav_prev:
+        _go_prev = st.button("◀", help="Previous frame", use_container_width=True)
+    with _nav_next:
+        _go_next = st.button("▶", help="Next frame",     use_container_width=True)
+
+    # Resolve button presses before reading slider (buttons take priority)
+    if _go_prev:
+        _cur_idx = max(0, _cur_idx - 1)
+    elif _go_next:
+        _cur_idx = min(_total - 1, _cur_idx + 1)
+
+    with _nav_slider:
+        _slider_val = st.slider(
+            "Frame",
+            min_value=0,
+            max_value=_total - 1,
+            value=_cur_idx,
+            step=1,
+            label_visibility="collapsed",
+            key="frame_timeline_slider",
+        )
+    # Slider overrides button if both somehow triggered (shouldn't happen)
+    if not _go_prev and not _go_next:
+        _cur_idx = _slider_val
+
+    st.caption(
+        f"Frame **{_cur_idx + 1} / {_total}** — "
+        f"{frame_timestamp(_cur_idx, _fps)} "
+        f"({_fps:.2f} fps)"
+    )
+
+    # If frame changed, update the three session-state images
+    if _cur_idx != st.session_state.frame_idx:
+        st.session_state.frame_idx      = _cur_idx
+        _new_frame = _vf[_cur_idx]
+        st.session_state.original       = _new_frame
+        st.session_state.noise_frame    = _new_frame.copy()
+        st.session_state.denoised_frame = _new_frame.copy()
+        set_status(f"Jumped to frame {_cur_idx + 1}.", ok=True)
+        st.rerun()
+
+    # Thumbnail filmstrip — up to 12 evenly-sampled frames
+    _N_THUMBS = min(12, _total)
+    _thumb_indices = [round(i * (_total - 1) / (_N_THUMBS - 1)) for i in range(_N_THUMBS)] \
+        if _N_THUMBS > 1 else [0]
+
+    _thumb_cols = st.columns(_N_THUMBS)
+    for _ti, (_tcol, _tidx) in enumerate(zip(_thumb_cols, _thumb_indices)):
+        _thumb_frame = _vf[_tidx]
+        # Resize thumbnail to fixed height (96 px) for speed
+        _th, _tw = _thumb_frame.shape[:2]
+        _target_h = 96
+        _target_w = max(1, int(_tw * _target_h / _th))
+        _thumb_small = cv2.resize(_thumb_frame, (_target_w, _target_h))
+        _is_current = (_tidx == st.session_state.frame_idx)
+        with _tcol:
+            st.image(bgr_to_rgb(_thumb_small), use_container_width=True)
+            _label = f"**{_tidx + 1}**" if _is_current else str(_tidx + 1)
+            st.caption(_label)
+
+    st.divider()
+
+# ---------------------------------------------------------------------------
 # Handle button actions — process only the first clicked button per rerun
 # ---------------------------------------------------------------------------
 
@@ -394,19 +508,18 @@ if _original is not None:
             break
 
 # ---------------------------------------------------------------------------
-# Main area — 3 frames: Initial | Noise | Denoised
+# Status feedback
 # ---------------------------------------------------------------------------
 
-if st.session_state.original is None:
-    st.info("👈 Upload an image using the sidebar to get started.")
-    st.stop()
-
-# Status feedback
 if st.session_state.status_msg:
     if st.session_state.status_ok:
         st.success(st.session_state.status_msg)
     else:
         st.info(st.session_state.status_msg)
+
+# ---------------------------------------------------------------------------
+# 3-frame display: Initial | Noise | Denoised
+# ---------------------------------------------------------------------------
 
 col_init, col_noise, col_den = st.columns(3)
 
