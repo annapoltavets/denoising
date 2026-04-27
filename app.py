@@ -57,6 +57,48 @@ st.caption(
 )
 
 # ---------------------------------------------------------------------------
+# Global CSS — cleaner, flatter design
+# ---------------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    /* ── Page background ─────────────────────────────────────────── */
+    .stApp { background-color: #f4f6f9; }
+
+    /* ── Sidebar ──────────────────────────────────────────────────── */
+    [data-testid="stSidebar"] > div:first-child {
+        background-color: #ffffff;
+        border-right: 1px solid #dde1e7;
+    }
+
+    /* ── Buttons ──────────────────────────────────────────────────── */
+    .stButton > button {
+        border-radius: 6px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+    }
+
+    /* ── Image containers — flat, no rounded shadow ───────────────── */
+    [data-testid="stImage"] {
+        border: 1px solid #dde1e7;
+        border-radius: 0 !important;
+    }
+
+    /* ── Selectbox / Slider labels ────────────────────────────────── */
+    .stSelectbox label, .stSlider label {
+        font-size: 0.82rem;
+        font-weight: 500;
+        color: #444;
+    }
+
+    /* ── Divider ──────────────────────────────────────────────────── */
+    hr { border-color: #dde1e7; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ---------------------------------------------------------------------------
 # Colour palette  (name → BGR tuple for OpenCV)
 # ---------------------------------------------------------------------------
 
@@ -216,7 +258,7 @@ if st.session_state.original is not None:
 st.sidebar.divider()
 st.sidebar.header("⚙️ Noise detectors")
 st.sidebar.caption(
-    "Expand a detector, pick a **highlight colour**, tune parameters, then:\n"
+    "Pick a noise type, choose a highlight colour, tune the parameters, then:\n"
     "- **Detect** — paint noise pixels on the *Noise* frame\n"
     "- **Denoise** — apply removal to the *Denoised* frame"
 )
@@ -224,171 +266,171 @@ st.sidebar.caption(
 # Each entry collected below: (detect_clicked, denoise_clicked, noise_instance, color_bgr)
 _pending: list[tuple[bool, bool, object, tuple[int, int, int]]] = []
 
+# ---------------------------------------------------------------------------
+# Noise type list (displayed in the selectbox)
+# ---------------------------------------------------------------------------
 
-def _color_and_buttons(key: str, default_color: str = "Red"):
-    """Render colour selector + Detect/Denoise buttons. Returns (detect, denoise, color_bgr)."""
-    color_name = st.selectbox(
-        "Highlight colour",
-        COLOR_NAMES,
-        index=COLOR_NAMES.index(default_color),
-        key=f"{key}_color",
-        label_visibility="collapsed",
+NOISE_NAMES = [
+    "Row / Column Striping",
+    "Clipping / Saturation",
+    "Quantization",
+    "White Gaussian (AWGN)",
+    "Shot / Photon Noise",
+    "Scaled Poisson Noise",
+    "Poisson–Gaussian Mixed Noise",
+    "Heteroskedastic Gaussian Noise",
+    "Multiplicative Noise",
+    "Thermal Noise (Dark Current)",
+    "Cross-Talk Noise",
+    "Colored / Correlated Noise",
+    "Gain Nonuniformity",
+    "Lens Flare Noise",
+    "Fixed-Pattern Noise (temporal)",
+    "PRNU (temporal)",
+    "Flicker / Pink Noise (temporal)",
+    "Real Camera Raw (catch-all)",
+    "Temporal Block-Outlier Noise",
+]
+
+# Noise type selector (replaces expander blocks)
+_sel = st.sidebar.selectbox("Noise type", NOISE_NAMES, key="noise_selector")
+st.sidebar.divider()
+
+# Colour picker + action buttons (shared, always visible)
+_color_name = st.sidebar.selectbox(
+    "Highlight colour",
+    COLOR_NAMES,
+    index=0,
+    key="noise_color",
+    label_visibility="visible",
+)
+st.sidebar.caption(f"🎨 **{_color_name}**")
+_btn_c1, _btn_c2 = st.sidebar.columns(2)
+_det = _btn_c1.button("🔍 Detect",  key="noise_detect",  use_container_width=True)
+_den = _btn_c2.button("🔧 Denoise", key="noise_denoise", use_container_width=True)
+_col = COLORS[_color_name]
+
+st.sidebar.divider()
+st.sidebar.caption("**Parameters**")
+
+# ---------------------------------------------------------------------------
+# Parameters — rendered only for the selected noise type (no expanders)
+# ---------------------------------------------------------------------------
+
+_noise_obj = None
+
+if _sel == "Row / Column Striping":
+    _rcn_thresh = st.sidebar.slider(
+        "Stripe threshold (σ of row/col means)", 0.5, 20.0, 2.0, 0.5, key="rcn_thresh",
     )
-    st.caption(f"🎨 **{color_name}**")
-    _c1, _c2 = st.columns(2)
-    _det = _c1.button("🔍 Detect",  key=f"{key}_detect",  use_container_width=True)
-    _den = _c2.button("🔧 Denoise", key=f"{key}_denoise", use_container_width=True)
-    return _det, _den, COLORS[color_name]
+    _noise_obj = RowColumnStripingNoise(stripe_threshold=_rcn_thresh)
 
+elif _sel == "Clipping / Saturation":
+    _clip_thresh = st.sidebar.slider("Clipped pixel fraction", 0.001, 0.2, 0.01, 0.001, format="%.3f", key="clip_thresh")
+    _clip_radius = st.sidebar.slider("Inpaint radius (px)", 1, 10, 3, key="clip_radius")
+    _noise_obj = ClippingSaturationNoise(clip_threshold=_clip_thresh, inpaint_radius=_clip_radius)
 
-# ------ Row / Column Striping ------
-with st.sidebar.expander("Row / Column Striping", expanded=False):
-    _det, _den, _col = _color_and_buttons("rcn")
-    _rcn_thresh = st.slider(
-        "Stripe threshold (σ of row/col means)",
-        0.5, 20.0, 2.0, 0.5, key="rcn_thresh",
-    )
-    _pending.append((_det, _den, RowColumnStripingNoise(stripe_threshold=_rcn_thresh), _col))
+elif _sel == "Quantization":
+    _quant_bits  = st.sidebar.slider("Effective-bits threshold (< → noisy)", 1, 8, 5, key="quant_bits")
+    _quant_sigma = st.sidebar.slider("Smoothing σ", 0.1, 3.0, 0.8, 0.1, key="quant_sigma")
+    _noise_obj = QuantizationNoise(effective_bits_threshold=_quant_bits, gauss_sigma=_quant_sigma)
 
-# ------ Clipping / Saturation ------
-with st.sidebar.expander("Clipping / Saturation", expanded=False):
-    _det, _den, _col = _color_and_buttons("clip")
-    _clip_thresh  = st.slider("Clipped pixel fraction", 0.001, 0.2,  0.01,  0.001, format="%.3f", key="clip_thresh")
-    _clip_radius  = st.slider("Inpaint radius (px)",    1,     10,   3,            key="clip_radius")
-    _pending.append((_det, _den, ClippingSaturationNoise(clip_threshold=_clip_thresh, inpaint_radius=_clip_radius), _col))
+elif _sel == "White Gaussian (AWGN)":
+    _wgn_sigma = st.sidebar.slider("σ threshold (DN)", 1.0, 30.0, 5.0, 0.5, key="wgn_sigma")
+    _wgn_h     = st.sidebar.slider("NLM filter strength h", 1, 30, 10, key="wgn_h")
+    _noise_obj = WhiteGaussianNoise(sigma_threshold=_wgn_sigma, h=_wgn_h)
 
-# ------ Quantization ------
-with st.sidebar.expander("Quantization", expanded=False):
-    _det, _den, _col = _color_and_buttons("quant")
-    _quant_bits  = st.slider("Effective-bits threshold (< → noisy)", 1,   8,   5,         key="quant_bits")
-    _quant_sigma = st.slider("Smoothing σ",                           0.1, 3.0, 0.8, 0.1, key="quant_sigma")
-    _pending.append((_det, _den, QuantizationNoise(effective_bits_threshold=_quant_bits, gauss_sigma=_quant_sigma), _col))
+elif _sel == "Shot / Photon Noise":
+    _shot_r2     = st.sidebar.slider("R² threshold", 0.1, 1.0, 0.7, 0.05, key="shot_r2")
+    _shot_bs     = st.sidebar.slider("Block size (px)", 8, 64, 16, 8, key="shot_bs")
+    _shot_gsigma = st.sidebar.slider("Gaussian σ (removal)", 0.1, 5.0, 1.0, 0.1, key="shot_gsigma")
+    _noise_obj = ShotNoise(r2_threshold=_shot_r2, block_size=_shot_bs, gauss_sigma=_shot_gsigma)
 
-# ------ White Gaussian ------
-with st.sidebar.expander("White Gaussian (AWGN)", expanded=False):
-    _det, _den, _col = _color_and_buttons("wgn")
-    _wgn_sigma = st.slider("σ threshold (DN)",      1.0, 30.0, 5.0, 0.5, key="wgn_sigma")
-    _wgn_h     = st.slider("NLM filter strength h", 1,   30,   10,       key="wgn_h")
-    _pending.append((_det, _den, WhiteGaussianNoise(sigma_threshold=_wgn_sigma, h=_wgn_h), _col))
+elif _sel == "Scaled Poisson Noise":
+    _sp_r2     = st.sidebar.slider("R² threshold", 0.1, 1.0, 0.7, 0.05, key="sp_r2")
+    _sp_amin   = st.sidebar.slider("Min gain α", 0.01, 5.0, 0.1, 0.01, key="sp_amin")
+    _sp_bs     = st.sidebar.slider("Block size (px)", 8, 64, 16, 8, key="sp_bs")
+    _sp_gsigma = st.sidebar.slider("Gaussian σ (removal)", 0.1, 5.0, 1.0, 0.1, key="sp_gsigma")
+    _noise_obj = ScaledPoissonNoise(r2_threshold=_sp_r2, alpha_min=_sp_amin, block_size=_sp_bs, gauss_sigma=_sp_gsigma)
 
-# ------ Shot Noise ------
-with st.sidebar.expander("Shot / Photon Noise", expanded=False):
-    _det, _den, _col = _color_and_buttons("shot")
-    _shot_r2     = st.slider("R² threshold",         0.1, 1.0,  0.7, 0.05, key="shot_r2")
-    _shot_bs     = st.slider("Block size (px)",       8,   64,   16,  8,    key="shot_bs")
-    _shot_gsigma = st.slider("Gaussian σ (removal)",  0.1, 5.0,  1.0, 0.1,  key="shot_gsigma")
-    _pending.append((_det, _den, ShotNoise(r2_threshold=_shot_r2, block_size=_shot_bs, gauss_sigma=_shot_gsigma), _col))
+elif _sel == "Poisson–Gaussian Mixed Noise":
+    _pg_r2     = st.sidebar.slider("R² threshold", 0.1, 1.0, 0.6, 0.05, key="pg_r2")
+    _pg_bs     = st.sidebar.slider("Block size (px)", 8, 64, 16, 8, key="pg_bs")
+    _pg_gsigma = st.sidebar.slider("Gaussian σ (removal)", 0.1, 5.0, 1.0, 0.1, key="pg_gsigma")
+    _noise_obj = PoissonGaussianNoise(r2_threshold=_pg_r2, block_size=_pg_bs, gauss_sigma=_pg_gsigma)
 
-# ------ Scaled Poisson ------
-with st.sidebar.expander("Scaled Poisson Noise", expanded=False):
-    _det, _den, _col = _color_and_buttons("sp")
-    _sp_r2     = st.slider("R² threshold",        0.1,  1.0, 0.7, 0.05, key="sp_r2")
-    _sp_amin   = st.slider("Min gain α",           0.01, 5.0, 0.1, 0.01, key="sp_amin")
-    _sp_bs     = st.slider("Block size (px)",      8,    64,  16,  8,    key="sp_bs")
-    _sp_gsigma = st.slider("Gaussian σ (removal)", 0.1,  5.0, 1.0, 0.1,  key="sp_gsigma")
-    _pending.append((_det, _den, ScaledPoissonNoise(r2_threshold=_sp_r2, alpha_min=_sp_amin, block_size=_sp_bs, gauss_sigma=_sp_gsigma), _col))
+elif _sel == "Heteroskedastic Gaussian Noise":
+    _hg_slope = st.sidebar.slider("Slope threshold", 0.001, 1.0, 0.05, 0.005, format="%.3f", key="hg_slope")
+    _hg_bins  = st.sidebar.slider("Intensity bins", 2, 32, 8, key="hg_bins")
+    _hg_bs    = st.sidebar.slider("Block size (px)", 8, 64, 16, 8, key="hg_bs")
+    _noise_obj = HeteroskedasticGaussianNoise(slope_threshold=_hg_slope, n_bins=_hg_bins, block_size=_hg_bs)
 
-# ------ Poisson–Gaussian ------
-with st.sidebar.expander("Poisson–Gaussian Mixed Noise", expanded=False):
-    _det, _den, _col = _color_and_buttons("pg")
-    _pg_r2     = st.slider("R² threshold",        0.1, 1.0, 0.6, 0.05, key="pg_r2")
-    _pg_bs     = st.slider("Block size (px)",      8,   64,  16,  8,    key="pg_bs")
-    _pg_gsigma = st.slider("Gaussian σ (removal)", 0.1, 5.0, 1.0, 0.1,  key="pg_gsigma")
-    _pending.append((_det, _den, PoissonGaussianNoise(r2_threshold=_pg_r2, block_size=_pg_bs, gauss_sigma=_pg_gsigma), _col))
+elif _sel == "Multiplicative Noise":
+    _mul_cv     = st.sidebar.slider("CV ratio threshold", 0.1, 1.0, 0.6, 0.05, key="mul_cv")
+    _mul_gsigma = st.sidebar.slider("Gaussian σ (removal)", 0.1, 5.0, 1.5, 0.1, key="mul_gsigma")
+    _noise_obj = MultiplicativeNoise(cv_ratio_threshold=_mul_cv, gauss_sigma=_mul_gsigma)
 
-# ------ Heteroskedastic Gaussian ------
-with st.sidebar.expander("Heteroskedastic Gaussian Noise", expanded=False):
-    _det, _den, _col = _color_and_buttons("hg")
-    _hg_slope = st.slider("Slope threshold",  0.001, 1.0, 0.05, 0.005, format="%.3f", key="hg_slope")
-    _hg_bins  = st.slider("Intensity bins",   2,     32,  8,            key="hg_bins")
-    _hg_bs    = st.slider("Block size (px)",  8,     64,  16,  8,       key="hg_bs")
-    _pending.append((_det, _den, HeteroskedasticGaussianNoise(slope_threshold=_hg_slope, n_bins=_hg_bins, block_size=_hg_bs), _col))
+elif _sel == "Thermal Noise (Dark Current)":
+    _thm_dark  = st.sidebar.slider("Dark pixel threshold (DN)", 10, 100, 50, key="thm_dark")
+    _thm_sigma = st.sidebar.slider("Noise σ threshold (DN)", 0.5, 20.0, 4.0, 0.5, key="thm_sigma")
+    _thm_ksize = st.sidebar.slider("Gaussian kernel size (odd px)", 3, 15, 5, 2, key="thm_ksize")
+    _noise_obj = ThermalNoise(dark_threshold=_thm_dark, sigma_threshold=_thm_sigma, gauss_ksize=_thm_ksize)
 
-# ------ Multiplicative ------
-with st.sidebar.expander("Multiplicative Noise", expanded=False):
-    _det, _den, _col = _color_and_buttons("mul")
-    _mul_cv     = st.slider("CV ratio threshold",    0.1, 1.0, 0.6, 0.05, key="mul_cv")
-    _mul_gsigma = st.slider("Gaussian σ (removal)",  0.1, 5.0, 1.5, 0.1,  key="mul_gsigma")
-    _pending.append((_det, _den, MultiplicativeNoise(cv_ratio_threshold=_mul_cv, gauss_sigma=_mul_gsigma), _col))
+elif _sel == "Cross-Talk Noise":
+    _ct_corr = st.sidebar.slider("Lag-1 correlation threshold", 0.01, 0.9, 0.15, 0.01, key="ct_corr")
+    _noise_obj = CrossTalkNoise(corr_threshold=_ct_corr)
 
-# ------ Thermal ------
-with st.sidebar.expander("Thermal Noise (Dark Current)", expanded=False):
-    _det, _den, _col = _color_and_buttons("thm")
-    _thm_dark  = st.slider("Dark pixel threshold (DN)",       10,  100, 50,       key="thm_dark")
-    _thm_sigma = st.slider("Noise σ threshold (DN)",          0.5, 20.0, 4.0, 0.5, key="thm_sigma")
-    _thm_ksize = st.slider("Gaussian kernel size (odd px)",   3,   15,  5,  2,    key="thm_ksize")
-    _pending.append((_det, _den, ThermalNoise(dark_threshold=_thm_dark, sigma_threshold=_thm_sigma, gauss_ksize=_thm_ksize), _col))
+elif _sel == "Colored / Correlated Noise":
+    _cc_flat = st.sidebar.slider("Spectral flatness threshold (< → noisy)", 0.05, 0.95, 0.3, 0.05, key="cc_flat")
+    _noise_obj = ColoredCorrelatedNoise(flatness_threshold=_cc_flat)
 
-# ------ Cross-Talk ------
-with st.sidebar.expander("Cross-Talk Noise", expanded=False):
-    _det, _den, _col = _color_and_buttons("ct")
-    _ct_corr = st.slider("Lag-1 correlation threshold", 0.01, 0.9, 0.15, 0.01, key="ct_corr")
-    _pending.append((_det, _den, CrossTalkNoise(corr_threshold=_ct_corr), _col))
+elif _sel == "Gain Nonuniformity":
+    _gnu_grid = st.sidebar.slider("Grid size (tiles per side)", 2, 16, 4, key="gnu_grid")
+    _gnu_cv   = st.sidebar.slider("CV threshold", 0.01, 0.3, 0.05, 0.01, key="gnu_cv")
+    _noise_obj = GainNonuniformityNoise(grid_size=_gnu_grid, cv_threshold=_gnu_cv)
 
-# ------ Colored / Correlated ------
-with st.sidebar.expander("Colored / Correlated Noise", expanded=False):
-    _det, _den, _col = _color_and_buttons("cc")
-    _cc_flat = st.slider("Spectral flatness threshold (< → noisy)", 0.05, 0.95, 0.3, 0.05, key="cc_flat")
-    _pending.append((_det, _den, ColoredCorrelatedNoise(flatness_threshold=_cc_flat), _col))
+elif _sel == "Lens Flare Noise":
+    _lf_bright  = st.sidebar.slider("Bright pixel threshold (DN)", 150, 255, 240, key="lf_bright")
+    _lf_area    = st.sidebar.slider("Min flare area (px²)", 10, 2000, 200, key="lf_area")
+    _lf_dilate  = st.sidebar.slider("Dilation kernel size (px)", 1, 15, 5, 2, key="lf_dilate")
+    _lf_inpaint = st.sidebar.slider("Inpaint radius (px)", 1, 20, 5, key="lf_inpaint")
+    _noise_obj = LensFlareNoise(bright_threshold=_lf_bright, area_threshold=_lf_area, dilate_ksize=_lf_dilate, inpaint_radius=_lf_inpaint)
 
-# ------ Gain Nonuniformity ------
-with st.sidebar.expander("Gain Nonuniformity", expanded=False):
-    _det, _den, _col = _color_and_buttons("gnu")
-    _gnu_grid = st.slider("Grid size (tiles per side)", 2,    16,  4,          key="gnu_grid")
-    _gnu_cv   = st.slider("CV threshold",               0.01, 0.3, 0.05, 0.01, key="gnu_cv")
-    _pending.append((_det, _den, GainNonuniformityNoise(grid_size=_gnu_grid, cv_threshold=_gnu_cv), _col))
+elif _sel == "Fixed-Pattern Noise (temporal)":
+    _fpn_warmup = st.sidebar.slider("Warmup frames", 2, 30, 10, key="fpn_warmup")
+    _fpn_thresh = st.sidebar.slider("Pattern std threshold", 0.1, 20.0, 3.0, 0.1, key="fpn_thresh")
+    _fpn_lr     = st.sidebar.slider("Learning rate", 0.01, 0.5, 0.05, 0.01, key="fpn_lr")
+    _noise_obj = FixedPatternNoise(warmup_frames=_fpn_warmup, pattern_threshold=_fpn_thresh, learning_rate=_fpn_lr)
 
-# ------ Lens Flare ------
-with st.sidebar.expander("Lens Flare Noise", expanded=False):
-    _det, _den, _col = _color_and_buttons("lf")
-    _lf_bright  = st.slider("Bright pixel threshold (DN)", 150, 255,  240,       key="lf_bright")
-    _lf_area    = st.slider("Min flare area (px²)",         10, 2000, 200,       key="lf_area")
-    _lf_dilate  = st.slider("Dilation kernel size (px)",    1,  15,   5,   2,    key="lf_dilate")
-    _lf_inpaint = st.slider("Inpaint radius (px)",          1,  20,   5,         key="lf_inpaint")
-    _pending.append((_det, _den, LensFlareNoise(bright_threshold=_lf_bright, area_threshold=_lf_area, dilate_ksize=_lf_dilate, inpaint_radius=_lf_inpaint), _col))
+elif _sel == "PRNU (temporal)":
+    _prnu_warmup = st.sidebar.slider("Warmup frames", 2, 30, 15, key="prnu_warmup")
+    _prnu_cv     = st.sidebar.slider("CV threshold", 0.001, 0.2, 0.02, 0.001, format="%.3f", key="prnu_cv")
+    _prnu_lr     = st.sidebar.slider("Learning rate", 0.01, 0.5, 0.05, 0.01, key="prnu_lr")
+    _noise_obj = PRNUNoise(warmup_frames=_prnu_warmup, cv_threshold=_prnu_cv, learning_rate=_prnu_lr)
 
-# ------ Fixed Pattern ------
-with st.sidebar.expander("Fixed-Pattern Noise (temporal)", expanded=False):
-    _det, _den, _col = _color_and_buttons("fpn")
-    _fpn_warmup = st.slider("Warmup frames",         2,   30,  10,          key="fpn_warmup")
-    _fpn_thresh = st.slider("Pattern std threshold", 0.1, 20.0, 3.0, 0.1,  key="fpn_thresh")
-    _fpn_lr     = st.slider("Learning rate",         0.01, 0.5, 0.05, 0.01, key="fpn_lr")
-    _pending.append((_det, _den, FixedPatternNoise(warmup_frames=_fpn_warmup, pattern_threshold=_fpn_thresh, learning_rate=_fpn_lr), _col))
+elif _sel == "Flicker / Pink Noise (temporal)":
+    _flk_warmup = st.sidebar.slider("Warmup frames", 2, 20, 5, key="flk_warmup")
+    _flk_thresh = st.sidebar.slider("Brightness deviation threshold (DN)", 0.5, 30.0, 5.0, 0.5, key="flk_thresh")
+    _flk_lr     = st.sidebar.slider("Learning rate", 0.01, 0.5, 0.1, 0.01, key="flk_lr")
+    _noise_obj = FlickerNoise(warmup_frames=_flk_warmup, flicker_threshold=_flk_thresh, learning_rate=_flk_lr)
 
-# ------ PRNU ------
-with st.sidebar.expander("PRNU (temporal)", expanded=False):
-    _det, _den, _col = _color_and_buttons("prnu")
-    _prnu_warmup = st.slider("Warmup frames",  2,     30,  15,             key="prnu_warmup")
-    _prnu_cv     = st.slider("CV threshold",   0.001, 0.2, 0.02,  0.001, format="%.3f", key="prnu_cv")
-    _prnu_lr     = st.slider("Learning rate",  0.01,  0.5, 0.05,  0.01,  key="prnu_lr")
-    _pending.append((_det, _den, PRNUNoise(warmup_frames=_prnu_warmup, cv_threshold=_prnu_cv, learning_rate=_prnu_lr), _col))
+elif _sel == "Real Camera Raw (catch-all)":
+    _rcr_thresh = st.sidebar.slider("Noise σ threshold (DN)", 1.0, 30.0, 5.0, 0.5, key="rcr_thresh")
+    _rcr_bs     = st.sidebar.slider("Block size (px)", 8, 64, 16, 8, key="rcr_bs")
+    _rcr_hlum   = st.sidebar.slider("NLM luminance filter h", 1, 30, 10, key="rcr_hlum")
+    _rcr_hcol   = st.sidebar.slider("NLM colour filter h", 1, 30, 10, key="rcr_hcol")
+    _noise_obj = RealCameraRawNoise(noise_threshold=_rcr_thresh, block_size=_rcr_bs, h_luminance=_rcr_hlum, h_color=_rcr_hcol)
 
-# ------ Flicker ------
-with st.sidebar.expander("Flicker / Pink Noise (temporal)", expanded=False):
-    _det, _den, _col = _color_and_buttons("flk")
-    _flk_warmup = st.slider("Warmup frames",                    2,   20,  5,          key="flk_warmup")
-    _flk_thresh = st.slider("Brightness deviation threshold (DN)", 0.5, 30.0, 5.0, 0.5, key="flk_thresh")
-    _flk_lr     = st.slider("Learning rate",                    0.01, 0.5, 0.1, 0.01, key="flk_lr")
-    _pending.append((_det, _den, FlickerNoise(warmup_frames=_flk_warmup, flicker_threshold=_flk_thresh, learning_rate=_flk_lr), _col))
+elif _sel == "Temporal Block-Outlier Noise":
+    _tbo_bs     = st.sidebar.slider("Block size (px)", 4, 64, 8, 4, key="tbo_bs")
+    _tbo_zt     = st.sidebar.slider("Z-score threshold", 1.0, 10.0, 3.0, 0.5, key="tbo_zt")
+    _tbo_frac   = st.sidebar.slider("Min outlier block fraction", 0.001, 0.5, 0.01, 0.001, format="%.3f", key="tbo_frac")
+    _tbo_buf    = st.sidebar.slider("Frame buffer size", 3, 60, 20, key="tbo_buf")
+    _tbo_warmup = st.sidebar.slider("Warmup frames", 2, 20, 5, key="tbo_warmup")
+    _noise_obj = TemporalBlockOutlierNoise(block_size=_tbo_bs, zscore_threshold=_tbo_zt, min_outlier_fraction=_tbo_frac, buffer_size=_tbo_buf, warmup_frames=_tbo_warmup)
 
-# ------ Real Camera Raw ------
-with st.sidebar.expander("Real Camera Raw (catch-all)", expanded=False):
-    _det, _den, _col = _color_and_buttons("rcr")
-    _rcr_thresh = st.slider("Noise σ threshold (DN)",        1.0, 30.0, 5.0, 0.5, key="rcr_thresh")
-    _rcr_bs     = st.slider("Block size (px)",               8,   64,   16,  8,    key="rcr_bs")
-    _rcr_hlum   = st.slider("NLM luminance filter h",        1,   30,   10,        key="rcr_hlum")
-    _rcr_hcol   = st.slider("NLM colour filter h",           1,   30,   10,        key="rcr_hcol")
-    _pending.append((_det, _den, RealCameraRawNoise(noise_threshold=_rcr_thresh, block_size=_rcr_bs, h_luminance=_rcr_hlum, h_color=_rcr_hcol), _col))
-
-# ------ Temporal Block Outlier ------
-with st.sidebar.expander("Temporal Block-Outlier Noise", expanded=False):
-    _det, _den, _col = _color_and_buttons("tbo")
-    _tbo_bs     = st.slider("Block size (px)",             4,     64,   8,    4,    key="tbo_bs")
-    _tbo_zt     = st.slider("Z-score threshold",           1.0,   10.0, 3.0,  0.5,  key="tbo_zt")
-    _tbo_frac   = st.slider("Min outlier block fraction",  0.001, 0.5,  0.01, 0.001, format="%.3f", key="tbo_frac")
-    _tbo_buf    = st.slider("Frame buffer size",           3,     60,   20,          key="tbo_buf")
-    _tbo_warmup = st.slider("Warmup frames",               2,     20,   5,           key="tbo_warmup")
-    _pending.append((_det, _den, TemporalBlockOutlierNoise(block_size=_tbo_bs, zscore_threshold=_tbo_zt, min_outlier_fraction=_tbo_frac, buffer_size=_tbo_buf, warmup_frames=_tbo_warmup), _col))
+if _noise_obj is not None:
+    _pending.append((_det, _den, _noise_obj, _col))
 
 # ---------------------------------------------------------------------------
 # Main area — guard
