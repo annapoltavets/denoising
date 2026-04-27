@@ -7,8 +7,10 @@ import numpy as np
 class Noise(ABC):
     """Abstract base class for every noise type.
 
-    Subclasses must implement :meth:`name`, :meth:`detect`, :meth:`remove`,
-    and :meth:`_noise_mask`.
+    Subclasses must implement the public interface (:meth:`name`,
+    :meth:`detect`, :meth:`remove`) and the internal helper
+    :meth:`_noise_mask`, which :meth:`color_red` relies on to identify
+    noisy pixels.
     """
 
     @property

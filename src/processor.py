@@ -78,7 +78,7 @@ class Processor:
         input_path:
             Path to the source video file (any format supported by OpenCV).
         output_path:
-            Path for the denoised output video (MP4 / H.264 container).
+            Path for the denoised output video (MP4 / MPEG-4 Part 2 container).
 
         Raises
         ------

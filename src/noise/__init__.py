@@ -51,7 +51,7 @@ __all__ = [
 ]
 
 
-def all_noises() -> list:
+def all_noises() -> list["Noise"]:
     """Return one instance of every registered noise type.
 
     The order matters: faster / simpler detectors run first so that the
