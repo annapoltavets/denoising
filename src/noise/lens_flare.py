@@ -64,6 +64,4 @@ class LensFlareNoise(Noise):
 
     def remove(self, frame: np.ndarray) -> np.ndarray:
         mask = self._flare_mask(frame)
-        if frame.ndim == 3:
-            return cv2.inpaint(frame, mask, self._inpaint_radius, cv2.INPAINT_TELEA)
         return cv2.inpaint(frame, mask, self._inpaint_radius, cv2.INPAINT_TELEA)

@@ -59,6 +59,4 @@ class ClippingSaturationNoise(Noise):
             cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
         )
         mask = self._clip_mask(gray)
-        if frame.ndim == 3:
-            return cv2.inpaint(frame, mask, self._inpaint_radius, cv2.INPAINT_TELEA)
         return cv2.inpaint(frame, mask, self._inpaint_radius, cv2.INPAINT_TELEA)
